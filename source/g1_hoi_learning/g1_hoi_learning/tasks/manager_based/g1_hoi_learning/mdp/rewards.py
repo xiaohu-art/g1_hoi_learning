@@ -1,27 +1,77 @@
-# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
-# All rights reserved.
-#
-# SPDX-License-Identifier: BSD-3-Clause
-
 from __future__ import annotations
-
-from typing import TYPE_CHECKING
 
 import torch
 
-from isaaclab.assets import Articulation
-from isaaclab.managers import SceneEntityCfg
-from isaaclab.utils.math import wrap_to_pi
+from isaaclab.envs import ManagerBasedRLEnv
+from isaaclab.utils.math import quat_error_magnitude
 
-if TYPE_CHECKING:
-    from isaaclab.envs import ManagerBasedRLEnv
+from .commands import MotionCommand
 
 
-def joint_pos_target_l2(env: ManagerBasedRLEnv, target: float, asset_cfg: SceneEntityCfg) -> torch.Tensor:
-    """Penalize joint position deviation from a target value."""
-    # extract the used quantities (to enable type-hinting)
-    asset: Articulation = env.scene[asset_cfg.name]
-    # wrap the joint positions to (-pi, pi)
-    joint_pos = wrap_to_pi(asset.data.joint_pos[:, asset_cfg.joint_ids])
-    # compute the reward
-    return torch.sum(torch.square(joint_pos - target), dim=1)
+def motion_anchor_position_error_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    error = torch.sum(torch.square(command.anchor_pos_w - command.robot_anchor_pos_w), dim=-1)
+    return torch.exp(-error / std**2)
+
+
+def motion_anchor_orientation_error_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    error = quat_error_magnitude(command.anchor_quat_w, command.robot_anchor_quat_w) ** 2
+    return torch.exp(-error / std**2)
+
+
+def motion_body_position_error_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    error = torch.sum(
+        torch.square(
+            command.body_pos_w[:, command.body_indices] - command.robot_body_pos_w[:, command.body_indices]
+        ),
+        dim=-1,
+    )
+    return torch.exp(-error.mean(-1) / std**2)
+
+
+def motion_body_orientation_error_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    error = (
+        quat_error_magnitude(
+            command.body_quat_w[:, command.body_indices],
+            command.robot_body_quat_w[:, command.body_indices],
+        )
+        ** 2
+    )
+    return torch.exp(-error.mean(-1) / std**2)
+
+
+def motion_body_linear_velocity_error_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    error = torch.sum(
+        torch.square(
+            command.body_lin_vel_w[:, command.body_indices] - command.robot_body_lin_vel_w[:, command.body_indices]
+        ),
+        dim=-1,
+    )
+    return torch.exp(-error.mean(-1) / std**2)
+
+
+def motion_body_angular_velocity_error_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    error = torch.sum(
+        torch.square(
+            command.body_ang_vel_w[:, command.body_indices] - command.robot_body_ang_vel_w[:, command.body_indices]
+        ),
+        dim=-1,
+    )
+    return torch.exp(-error.mean(-1) / std**2)

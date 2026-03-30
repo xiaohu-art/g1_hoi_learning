@@ -38,6 +38,7 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab.utils.math import axis_angle_from_quat, quat_conjugate, quat_mul, quat_slerp, quat_from_matrix, quat_unique
 
 from g1_hoi_learning.robots.g1_inspire import G1_INSPIRE_CFG
+from g1_hoi_learning.objects.object_cfg import CLOTHESSTAND_CFG
 
 # Joint ordering from pytorch-kinematics URDF parse
 G1_JOINT_NAMES = [
@@ -112,6 +113,8 @@ class ReplaySceneCfg(InteractiveSceneCfg):
     )
 
     robot = G1_INSPIRE_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+
+    obj = CLOTHESSTAND_CFG.replace(prim_path="{ENV_REGEX_NS}/Object")
 
 
 class MotionLoader:
@@ -221,6 +224,7 @@ def process_motion(sim: SimulationContext, scene: InteractiveScene, joint_indice
     )
 
     robot = scene["robot"]
+    obj_asset = scene["obj"]
 
     log = {
         "fps": [args_cli.output_fps],
@@ -262,9 +266,19 @@ def process_motion(sim: SimulationContext, scene: InteractiveScene, joint_indice
         joint_vel[:, joint_indices] = dof_vel
         robot.write_joint_state_to_sim(joint_pos, joint_vel)
 
+        # Set object state
+        obj_root_state = obj_asset.data.default_root_state.clone()
+        obj_root_state[:, :3] = obj_pos
+        obj_root_state[:, :2] += scene.env_origins[:, :2]
+        obj_root_state[:, 3:7] = obj_rot
+        obj_root_state[:, 7:10] = obj_lin_vel
+        obj_root_state[:, 10:] = obj_ang_vel
+        obj_asset.write_root_state_to_sim(obj_root_state)
+
         sim.render()
         scene.update(sim.get_physics_dt())
 
+        # Record robot data
         log["joint_pos"].append(robot.data.joint_pos[0, :].cpu().numpy().copy())
         log["joint_vel"].append(robot.data.joint_vel[0, :].cpu().numpy().copy())
         log["body_pos_w"].append(robot.data.body_pos_w[0, :].cpu().numpy().copy())
@@ -272,12 +286,11 @@ def process_motion(sim: SimulationContext, scene: InteractiveScene, joint_indice
         log["body_lin_vel_w"].append(robot.data.body_lin_vel_w[0, :].cpu().numpy().copy())
         log["body_ang_vel_w"].append(robot.data.body_ang_vel_w[0, :].cpu().numpy().copy())
 
-        obj_pos_w = obj_pos.clone()
-        obj_pos_w[:, :2] += scene.env_origins[:, :2]
-        log["object_pos_w"].append(obj_pos_w[0, :].cpu().numpy().copy())
-        log["object_quat_w"].append(obj_rot[0, :].cpu().numpy().copy())
-        log["object_lin_vel_w"].append(obj_lin_vel[0, :].cpu().numpy().copy())
-        log["object_ang_vel_w"].append(obj_ang_vel[0, :].cpu().numpy().copy())
+        # Record object data from scene entity
+        log["object_pos_w"].append(obj_asset.data.body_pos_w[0, 0].cpu().numpy().copy())
+        log["object_quat_w"].append(obj_asset.data.body_quat_w[0, 0].cpu().numpy().copy())
+        log["object_lin_vel_w"].append(obj_asset.data.body_lin_vel_w[0, 0].cpu().numpy().copy())
+        log["object_ang_vel_w"].append(obj_asset.data.body_ang_vel_w[0, 0].cpu().numpy().copy())
 
         if reset_flag:
             for k in list(log.keys()):

@@ -1,5 +1,5 @@
 import isaaclab.sim as sim_utils
-from isaaclab.assets import ArticulationCfg, AssetBaseCfg
+from isaaclab.assets import ArticulationCfg, AssetBaseCfg, RigidObjectCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
@@ -15,7 +15,8 @@ from .mdp.commands import MotionCommandCfg
 ##
 # Pre-defined configs
 ##
-from g1_hoi_learning.robots.g1_inspire import G1_INSPIRE_CFG  # isort:skip
+from g1_hoi_learning.robots.g1_inspire import G1_ACTION_SCALE, G1_INSPIRE_CFG  # isort:skip
+from g1_hoi_learning.objects.object_cfg import CLOTHESSTAND_CFG  # isort:skip
 
 
 ##
@@ -33,6 +34,8 @@ class G1HoiLearningSceneCfg(InteractiveSceneCfg):
     )
 
     robot: ArticulationCfg = G1_INSPIRE_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+
+    object: RigidObjectCfg = CLOTHESSTAND_CFG.replace(prim_path="{ENV_REGEX_NS}/Object")
 
     dome_light = AssetBaseCfg(
         prim_path="/World/DomeLight",
@@ -89,8 +92,15 @@ class ActionsCfg:
             ".*_shoulder_pitch_joint", ".*_shoulder_roll_joint", ".*_shoulder_yaw_joint",
             ".*_elbow_joint",
             ".*_wrist_roll_joint", ".*_wrist_pitch_joint", ".*_wrist_yaw_joint",
+            # fingers (24 DOF)
+            ".*_thumb_proximal_yaw_joint", ".*_thumb_proximal_pitch_joint",
+            ".*_thumb_intermediate_joint", ".*_thumb_distal_joint",
+            ".*_index_proximal_joint", ".*_index_intermediate_joint",
+            ".*_middle_proximal_joint", ".*_middle_intermediate_joint",
+            ".*_ring_proximal_joint", ".*_ring_intermediate_joint",
+            ".*_pinky_proximal_joint", ".*_pinky_intermediate_joint",
         ],
-        scale=1.0,
+        scale=G1_ACTION_SCALE,
     )
 
 
@@ -102,13 +112,23 @@ class ObservationsCfg:
     class PolicyCfg(ObsGroup):
         """Observations for policy group."""
 
+        # motion command targets
         command = ObsTerm(func=mdp.generated_commands, params={"command_name": "motion"})
+        # reference body
         motion_anchor_pos_b = ObsTerm(func=mdp.motion_anchor_pos_b, params={"command_name": "motion"})
         motion_anchor_ori_b = ObsTerm(func=mdp.motion_anchor_ori_b, params={"command_name": "motion"})
         motion_body_pos_b = ObsTerm(func=mdp.motion_body_pos_b, params={"command_name": "motion"})
         motion_body_ori_b = ObsTerm(func=mdp.motion_body_ori_b, params={"command_name": "motion"})
+        # reference object
+        diff_object_pos_b = ObsTerm(func=mdp.diff_object_pos_b, params={"command_name": "motion"})
+        diff_object_rot_b = ObsTerm(func=mdp.diff_object_rot_b, params={"command_name": "motion"})
+        # robot body state
         body_pos = ObsTerm(func=mdp.robot_body_pos_b, params={"command_name": "motion"})
         body_ori = ObsTerm(func=mdp.robot_body_ori_b, params={"command_name": "motion"})
+        # object state
+        object_pos_b = ObsTerm(func=mdp.object_pos_b, params={"command_name": "motion"})
+        object_rot_b = ObsTerm(func=mdp.object_rot_b, params={"command_name": "motion"})
+        # robot proprioception
         base_lin_vel = ObsTerm(func=mdp.base_lin_vel)
         base_ang_vel = ObsTerm(func=mdp.base_ang_vel)
         joint_pos = ObsTerm(func=mdp.joint_pos_rel)
@@ -123,13 +143,23 @@ class ObservationsCfg:
     class CriticCfg(ObsGroup):
         """Observations for critic (same as policy)."""
 
+        # motion command targets
         command = ObsTerm(func=mdp.generated_commands, params={"command_name": "motion"})
+        # reference body
         motion_anchor_pos_b = ObsTerm(func=mdp.motion_anchor_pos_b, params={"command_name": "motion"})
         motion_anchor_ori_b = ObsTerm(func=mdp.motion_anchor_ori_b, params={"command_name": "motion"})
         motion_body_pos_b = ObsTerm(func=mdp.motion_body_pos_b, params={"command_name": "motion"})
         motion_body_ori_b = ObsTerm(func=mdp.motion_body_ori_b, params={"command_name": "motion"})
+        # reference object
+        diff_object_pos_b = ObsTerm(func=mdp.diff_object_pos_b, params={"command_name": "motion"})
+        diff_object_rot_b = ObsTerm(func=mdp.diff_object_rot_b, params={"command_name": "motion"})
+        # robot body state
         body_pos = ObsTerm(func=mdp.robot_body_pos_b, params={"command_name": "motion"})
         body_ori = ObsTerm(func=mdp.robot_body_ori_b, params={"command_name": "motion"})
+        # object state
+        object_pos_b = ObsTerm(func=mdp.object_pos_b, params={"command_name": "motion"})
+        object_rot_b = ObsTerm(func=mdp.object_rot_b, params={"command_name": "motion"})
+        # robot proprioception
         base_lin_vel = ObsTerm(func=mdp.base_lin_vel)
         base_ang_vel = ObsTerm(func=mdp.base_ang_vel)
         joint_pos = ObsTerm(func=mdp.joint_pos_rel)
@@ -177,6 +207,28 @@ class RewardsCfg:
         weight=1.0,
         params={"command_name": "motion", "std": 3.14},
     )
+    # object tracking rewards
+    object_pos = RewTerm(
+        func=mdp.object_position_error_exp,
+        weight=1.0,
+        params={"command_name": "motion", "std": 0.3},
+    )
+    object_ori = RewTerm(
+        func=mdp.object_orientation_error_exp,
+        weight=1.0,
+        params={"command_name": "motion", "std": 0.4},
+    )
+    object_lin_vel = RewTerm(
+        func=mdp.object_linear_velocity_error_exp,
+        weight=0.5,
+        params={"command_name": "motion", "std": 1.0},
+    )
+    object_ang_vel = RewTerm(
+        func=mdp.object_angular_velocity_error_exp,
+        weight=0.5,
+        params={"command_name": "motion", "std": 3.14},
+    )
+    # regularization
     action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.1)
     joint_limit = RewTerm(
         func=mdp.joint_pos_limits,
@@ -197,6 +249,14 @@ class TerminationsCfg:
     )
     anchor_ori = DoneTerm(
         func=mdp.bad_anchor_ori,
+        params={"asset_cfg": SceneEntityCfg("robot"), "command_name": "motion", "threshold": 0.8},
+    )
+    object_pos = DoneTerm(
+        func=mdp.bad_object_pos,
+        params={"command_name": "motion", "threshold": 0.25},
+    )
+    object_ori = DoneTerm(
+        func=mdp.bad_object_ori,
         params={"asset_cfg": SceneEntityCfg("robot"), "command_name": "motion", "threshold": 0.8},
     )
     ee_body_pos = DoneTerm(
@@ -239,3 +299,4 @@ class G1HoiLearningEnvCfg(ManagerBasedRLEnvCfg):
         self.viewer.asset_name = "robot"
         self.sim.dt = 1 / 200
         self.sim.render_interval = self.decimation
+        self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15

@@ -4,7 +4,7 @@ from collections.abc import Sequence
 import numpy as np
 import torch
 
-from isaaclab.assets import Articulation
+from isaaclab.assets import Articulation, RigidObject
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.managers import CommandTerm, CommandTermCfg
 from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
@@ -27,6 +27,12 @@ class MotionLoader:
         self._body_ang_vel_w = torch.tensor(data["body_ang_vel_w"], dtype=torch.float32, device=device)
         self.time_step_total = self.joint_pos.shape[0]
 
+        # Object trajectory
+        self.object_pos_w = torch.tensor(data["object_pos_w"], dtype=torch.float32, device=device)
+        self.object_quat_w = torch.tensor(data["object_quat_w"], dtype=torch.float32, device=device)
+        self.object_lin_vel_w = torch.tensor(data["object_lin_vel_w"], dtype=torch.float32, device=device)
+        self.object_ang_vel_w = torch.tensor(data["object_ang_vel_w"], dtype=torch.float32, device=device)
+
 
 class MotionCommand(CommandTerm):
     cfg: "MotionCommandCfg"
@@ -34,6 +40,7 @@ class MotionCommand(CommandTerm):
     def __init__(self, cfg: "MotionCommandCfg", env: ManagerBasedRLEnv):
         # Set up robot references before super().__init__ because it calls _set_debug_vis_impl
         self.robot: Articulation = env.scene[cfg.asset_name]
+        self.object: RigidObject = env.scene[cfg.object_name]
         self.anchor_index = self.robot.body_names.index(cfg.anchor_body_name)
         self.body_indices, self.body_names = self.robot.find_bodies(cfg.body_names, preserve_order=True)
 
@@ -137,6 +144,40 @@ class MotionCommand(CommandTerm):
     def robot_anchor_ang_vel_w(self) -> torch.Tensor:
         return self.robot.data.body_ang_vel_w[:, self.anchor_index]
 
+    # -- reference object data properties
+    @property
+    def ref_obj_pos_w(self) -> torch.Tensor:
+        return self.motion.object_pos_w[self.time_steps] + self._env.scene.env_origins
+
+    @property
+    def ref_obj_quat_w(self) -> torch.Tensor:
+        return self.motion.object_quat_w[self.time_steps]
+
+    @property
+    def ref_obj_lin_vel_w(self) -> torch.Tensor:
+        return self.motion.object_lin_vel_w[self.time_steps]
+
+    @property
+    def ref_obj_ang_vel_w(self) -> torch.Tensor:
+        return self.motion.object_ang_vel_w[self.time_steps]
+
+    # -- sim object data properties
+    @property
+    def obj_pos_w(self) -> torch.Tensor:
+        return self.object.data.root_pos_w
+
+    @property
+    def obj_quat_w(self) -> torch.Tensor:
+        return self.object.data.root_quat_w
+
+    @property
+    def obj_lin_vel_w(self) -> torch.Tensor:
+        return self.object.data.root_lin_vel_w
+
+    @property
+    def obj_ang_vel_w(self) -> torch.Tensor:
+        return self.object.data.root_ang_vel_w
+
     # -- CommandTerm interface
     def _update_metrics(self):
         self.metrics["error_anchor_pos"] = torch.norm(self.anchor_pos_w - self.robot_anchor_pos_w, dim=-1)
@@ -154,11 +195,7 @@ class MotionCommand(CommandTerm):
         if len(env_ids) == 0:
             return
 
-        random_frames = torch.randint(
-            0, self.motion.time_step_total, (len(env_ids),),
-            device=self.device, dtype=torch.long,
-        )
-        self.time_steps[env_ids] = random_frames
+        self.time_steps[env_ids] = 0
 
         # Randomize root pose
         root_pos = self.anchor_pos_w.clone()
@@ -195,6 +232,15 @@ class MotionCommand(CommandTerm):
             env_ids=env_ids,
         )
         self.robot.write_joint_state_to_sim(joint_pos[env_ids], joint_vel[env_ids], env_ids=env_ids)
+
+        # Reset object to reference state
+        obj_state = torch.cat([
+            self.ref_obj_pos_w[env_ids],
+            self.ref_obj_quat_w[env_ids],
+            self.ref_obj_lin_vel_w[env_ids],
+            self.ref_obj_ang_vel_w[env_ids],
+        ], dim=-1)
+        self.object.write_root_state_to_sim(obj_state, env_ids=env_ids)
 
     def _update_command(self):
         self.time_steps += 1
@@ -252,6 +298,7 @@ class MotionCommand(CommandTerm):
 class MotionCommandCfg(CommandTermCfg):
     class_type: type = MotionCommand
     asset_name: str = "robot"
+    object_name: str = "object"
 
     anchor_body_name: str = "pelvis"
     body_names: list[str] = [

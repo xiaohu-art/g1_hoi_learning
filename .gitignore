@@ -78,3 +78,9 @@ tests/
 # logs
 **/logs/*
 **/outputs/*
+
+# docs
+**/docs/*
+
+# ruff
+**/.ruff_cache/

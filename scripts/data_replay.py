@@ -18,6 +18,8 @@ parser.add_argument("--input_file", type=str, required=True, help="Path to the r
 parser.add_argument("--output_file", type=str, required=True, help="Path to the output npz file.")
 parser.add_argument("--input_fps", type=int, default=30, help="FPS of the input motion.")
 parser.add_argument("--output_fps", type=int, default=50, help="FPS of the output motion.")
+parser.add_argument("--num_surface_points", type=int, default=1024, help="Number of surface points to sample on the object mesh.")
+parser.add_argument("--contact_distance_threshold", type=float, default=0.05, help="Distance threshold (meters) for binary contact label.")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
@@ -26,6 +28,7 @@ simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
+import trimesh
 import torch
 import joblib
 
@@ -35,7 +38,7 @@ from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
 from isaaclab.sim import SimulationContext
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
-from isaaclab.utils.math import axis_angle_from_quat, quat_conjugate, quat_mul, quat_slerp, quat_from_matrix, quat_unique
+from isaaclab.utils.math import axis_angle_from_quat, quat_conjugate, quat_mul, quat_rotate, quat_slerp, quat_from_matrix, quat_unique
 
 from g1_hoi_learning.robots.g1_inspire import G1_INSPIRE_CFG
 from g1_hoi_learning.objects.object_cfg import CLOTHESSTAND_CFG

@@ -57,3 +57,24 @@ def bad_motion_body_pos_z_only(
         command.body_pos_w[:, body_indices, -1] - command.robot_body_pos_w[:, body_indices, -1]
     )
     return torch.any(error > threshold, dim=-1)
+
+
+def bad_object_pos(env: ManagerBasedRLEnv, command_name: str, threshold: float) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    return torch.norm(command.ref_obj_pos_w - command.obj_pos_w, dim=-1) > threshold
+
+
+def bad_object_ori(
+    env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, command_name: str, threshold: float
+) -> torch.Tensor:
+    asset: RigidObject | Articulation = env.scene[asset_cfg.name]
+    command: MotionCommand = env.command_manager.get_term(command_name)
+
+    ref_projected_gravity_b = math_utils.quat_apply_inverse(
+        command.ref_obj_quat_w, asset.data.GRAVITY_VEC_W
+    )
+    obj_projected_gravity_b = math_utils.quat_apply_inverse(
+        command.obj_quat_w, asset.data.GRAVITY_VEC_W
+    )
+
+    return (ref_projected_gravity_b[:, 2] - obj_projected_gravity_b[:, 2]).abs() > threshold

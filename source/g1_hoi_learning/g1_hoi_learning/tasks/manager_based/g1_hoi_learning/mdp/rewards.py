@@ -75,3 +75,38 @@ def motion_body_angular_velocity_error_exp(
         dim=-1,
     )
     return torch.exp(-error.mean(-1) / std**2)
+
+
+# -- Object tracking rewards --
+
+
+def object_position_error_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    error = torch.sum(torch.square(command.ref_obj_pos_w - command.obj_pos_w), dim=-1)
+    return torch.exp(-error / std**2)
+
+
+def object_orientation_error_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    error = quat_error_magnitude(command.ref_obj_quat_w, command.obj_quat_w) ** 2
+    return torch.exp(-error / std**2)
+
+
+def object_linear_velocity_error_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    error = torch.sum(torch.square(command.ref_obj_lin_vel_w - command.obj_lin_vel_w), dim=-1)
+    return torch.exp(-error / std**2)
+
+
+def object_angular_velocity_error_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    error = torch.sum(torch.square(command.ref_obj_ang_vel_w - command.obj_ang_vel_w), dim=-1)
+    return torch.exp(-error / std**2)

@@ -35,6 +35,7 @@ import joblib
 import isaaclab.sim as sim_utils
 from isaaclab.assets import AssetBaseCfg
 from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
+from isaaclab.sensors import ContactSensorCfg
 from isaaclab.sim import SimulationContext
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
@@ -119,6 +120,14 @@ class ReplaySceneCfg(InteractiveSceneCfg):
 
     obj = CLOTHESSTAND_CFG.replace(prim_path="{ENV_REGEX_NS}/Object")
 
+    contact_sensor = ContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/.*",
+        history_length=2,
+        track_air_time=True,
+        filter_prim_paths_expr=["{ENV_REGEX_NS}/Object"],
+        debug_vis=True
+    )
+
 
 class MotionLoader:
     def __init__(self, data: dict, input_fps: int, output_fps: int, device: torch.device):
@@ -147,6 +156,9 @@ class MotionLoader:
             quat_from_matrix(torch.from_numpy(obj["rot"]).to(self.device, dtype=torch.float32))
         )
 
+        # Contact labels
+        self.contact_label_input = torch.from_numpy(data["contact_label"]).to(self.device, dtype=torch.float32)
+
         self.input_frames = self.root_poss_input.shape[0]
         self.duration = (self.input_frames - 1) * self.input_dt
         print(f"Motion loaded, duration: {self.duration:.2f} sec, frames: {self.input_frames}")
@@ -161,6 +173,10 @@ class MotionLoader:
         self.dof_poss = self._lerp(self.dof_poss_input[idx0], self.dof_poss_input[idx1], blend.unsqueeze(1))
         self.object_poss = self._lerp(self.object_poss_input[idx0], self.object_poss_input[idx1], blend.unsqueeze(1))
         self.object_rots = self._slerp(self.object_rots_input[idx0], self.object_rots_input[idx1], blend)
+
+        # Contact labels: nearest-neighbor interpolation (binary, don't blend)
+        nearest = torch.where(blend < 0.5, idx0, idx1)
+        self.contact_labels = self.contact_label_input[nearest]  # (output_frames, n_sensor_bodies)
 
         print(
             f"Motion interpolated, input frames: {self.input_frames}, input fps: {self.input_fps},"
@@ -209,6 +225,7 @@ class MotionLoader:
             self.object_rots[self.current_idx : self.current_idx + 1],
             self.object_lin_vels[self.current_idx : self.current_idx + 1],
             self.object_ang_vels[self.current_idx : self.current_idx + 1],
+            self.contact_labels[self.current_idx],
         )
         self.current_idx += 1
         reset_flag = self.current_idx >= self.output_frames
@@ -241,6 +258,7 @@ def process_motion(sim: SimulationContext, scene: InteractiveScene, joint_indice
         "object_quat_w": [],
         "object_lin_vel_w": [],
         "object_ang_vel_w": [],
+        "contact_label": [],
     }
 
     while simulation_app.is_running():
@@ -249,6 +267,7 @@ def process_motion(sim: SimulationContext, scene: InteractiveScene, joint_indice
                 root_pos, root_rot, root_lin_vel, root_ang_vel,
                 dof_pos, dof_vel,
                 obj_pos, obj_rot, obj_lin_vel, obj_ang_vel,
+                contact_label,
             ),
             reset_flag,
         ) = motion.get_next_state()
@@ -295,6 +314,9 @@ def process_motion(sim: SimulationContext, scene: InteractiveScene, joint_indice
         log["object_lin_vel_w"].append(obj_asset.data.body_lin_vel_w[0, 0].cpu().numpy().copy())
         log["object_ang_vel_w"].append(obj_asset.data.body_ang_vel_w[0, 0].cpu().numpy().copy())
 
+        # Record contact labels 
+        log["contact_label"].append(contact_label.cpu().numpy().copy())
+
         if reset_flag:
             for k in list(log.keys()):
                 if k != "fps":
@@ -318,12 +340,18 @@ def main():
 
     # Map pkl joint ordering to robot joint indices
     robot = scene["robot"]
+    contact_sensor = scene["contact_sensor"]
+
     joint_indices, _ = robot.find_joints(G1_JOINT_NAMES, preserve_order=True)
-    print(f"[INFO]: Matched {len(joint_indices)} joints")
 
     # Load retargeted data
     print(f"[INFO]: Loading motion from {args_cli.input_file}")
     data = joblib.load(args_cli.input_file)
+
+    # Reorder contact labels from pkl (pytorch-kinematics order) to contact sensor body order
+    pk_body_names = {name: i for i, name in enumerate(data["link_names"])}
+    reorder_idx = [pk_body_names[name] for name in contact_sensor.body_names]
+    data["contact_label"] = data["contact_label"][:, reorder_idx]
 
     log = process_motion(sim, scene, joint_indices, data)
 

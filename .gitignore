@@ -78,3 +78,9 @@ tests/
 # logs
 **/logs/*
 **/outputs/*
+
+# docs
+**/docs/*
+
+# worklogs
+worklog.md

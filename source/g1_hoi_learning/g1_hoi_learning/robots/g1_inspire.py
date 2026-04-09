@@ -184,36 +184,26 @@ G1_INSPIRE_CFG = ArticulationCfg(
             },
         ),
         # Inspire hand actuators
-        # Independent DOFs per hand: thumb yaw, thumb pitch, index, middle, ring, pinky (6 per hand)
-        # Mimic joints (intermediate/distal) are driven by URDF mimic tags but still need actuators
-        # "fingers_independent": ImplicitActuatorCfg(
-        #     joint_names_expr=[
-        #         ".*_thumb_proximal_yaw_joint",
-        #         ".*_thumb_proximal_pitch_joint",
-        #         ".*_index_proximal_joint",
-        #         ".*_middle_proximal_joint",
-        #         ".*_ring_proximal_joint",
-        #         ".*_pinky_proximal_joint",
-        #     ],
-        #     effort_limit_sim=1.0,
-        #     velocity_limit_sim=0.5,
-        #     stiffness=5.0,
-        #     damping=0.5,
-        # ),
-        # "fingers_mimic": ImplicitActuatorCfg(
-        #     joint_names_expr=[
-        #         ".*_thumb_intermediate_joint",
-        #         ".*_thumb_distal_joint",
-        #         ".*_index_intermediate_joint",
-        #         ".*_middle_intermediate_joint",
-        #         ".*_ring_intermediate_joint",
-        #         ".*_pinky_intermediate_joint",
-        #     ],
-        #     effort_limit_sim=1.0,
-        #     velocity_limit_sim=0.5,
-        #     stiffness=5.0,
-        #     damping=0.5,
-        # ),
+        "fingers": ImplicitActuatorCfg(
+            joint_names_expr=[
+                ".*_thumb_proximal_yaw_joint",
+                ".*_thumb_proximal_pitch_joint",
+                ".*_thumb_intermediate_joint",
+                ".*_thumb_distal_joint",
+                ".*_index_proximal_joint",
+                ".*_index_intermediate_joint",
+                ".*_middle_proximal_joint",
+                ".*_middle_intermediate_joint",
+                ".*_ring_proximal_joint",
+                ".*_ring_intermediate_joint",
+                ".*_pinky_proximal_joint",
+                ".*_pinky_intermediate_joint",
+            ],
+            effort_limit_sim=1.0,
+            velocity_limit_sim=5.0,
+            stiffness=5.0,
+            damping=0.5,
+        ),
     },
 )
 

@@ -4,7 +4,7 @@ from collections.abc import Sequence
 import numpy as np
 import torch
 
-from isaaclab.assets import Articulation
+from isaaclab.assets import Articulation, RigidObject
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.managers import CommandTerm, CommandTermCfg
 from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
@@ -27,6 +27,12 @@ class MotionLoader:
         self._body_ang_vel_w = torch.tensor(data["body_ang_vel_w"], dtype=torch.float32, device=device)
         self.time_step_total = self.joint_pos.shape[0]
 
+        # Object trajectory
+        self.object_pos_w = torch.tensor(data["object_pos_w"], dtype=torch.float32, device=device)
+        self.object_quat_w = torch.tensor(data["object_quat_w"], dtype=torch.float32, device=device)
+        self.object_lin_vel_w = torch.tensor(data["object_lin_vel_w"], dtype=torch.float32, device=device)
+        self.object_ang_vel_w = torch.tensor(data["object_ang_vel_w"], dtype=torch.float32, device=device)
+
 
 class MotionCommand(CommandTerm):
     cfg: "MotionCommandCfg"
@@ -34,6 +40,7 @@ class MotionCommand(CommandTerm):
     def __init__(self, cfg: "MotionCommandCfg", env: ManagerBasedRLEnv):
         # Set up robot references before super().__init__ because it calls _set_debug_vis_impl
         self.robot: Articulation = env.scene[cfg.asset_name]
+        self.object: RigidObject = env.scene[cfg.object_name]
         self.anchor_index = self.robot.body_names.index(cfg.anchor_body_name)
         self.body_indices, self.body_names = self.robot.find_bodies(cfg.body_names, preserve_order=True)
 
@@ -42,6 +49,7 @@ class MotionCommand(CommandTerm):
         self.motion = MotionLoader(self.cfg.motion_file, device=self.device)
 
         self.time_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        self.future_offsets = torch.tensor(cfg.future_offsets, dtype=torch.long, device=self.device)
 
         self.metrics["error_anchor_pos"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_anchor_rot"] = torch.zeros(self.num_envs, device=self.device)
@@ -50,7 +58,14 @@ class MotionCommand(CommandTerm):
         self.metrics["error_joint_pos"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_joint_vel"] = torch.zeros(self.num_envs, device=self.device)
 
-    # -- command property (fed as observation)
+    # -- future time steps
+    @property
+    def _future_ts(self) -> torch.Tensor:
+        """(num_envs, num_offsets) clamped future time step indices."""
+        future = self.time_steps.unsqueeze(1) + self.future_offsets.unsqueeze(0)
+        return future.clamp(max=self.motion.time_step_total - 1)
+
+    # -- command property
     @property
     def command(self) -> torch.Tensor:
         return torch.cat([self.joint_pos, self.joint_vel], dim=1)
@@ -61,8 +76,18 @@ class MotionCommand(CommandTerm):
         return self.motion.joint_pos[self.time_steps]
 
     @property
+    def future_joint_pos(self) -> torch.Tensor:
+        """Future reference joint positions. (num_envs, num_offsets * num_joints)"""
+        return self.motion.joint_pos[self._future_ts]
+
+    @property
     def joint_vel(self) -> torch.Tensor:
         return self.motion.joint_vel[self.time_steps]
+
+    @property
+    def future_joint_vel(self) -> torch.Tensor:
+        """Future reference joint velocities. (num_envs, num_offsets * num_joints)"""
+        return self.motion.joint_vel[self._future_ts]
 
     @property
     def anchor_pos_w(self) -> torch.Tensor:
@@ -79,6 +104,23 @@ class MotionCommand(CommandTerm):
     @property
     def anchor_ang_vel_w(self) -> torch.Tensor:
         return self.motion._body_ang_vel_w[self.time_steps, self.anchor_index]
+
+    # -- future anchor/body (num_envs, num_offsets, ...)
+    @property
+    def future_anchor_pos_w(self) -> torch.Tensor:
+        return self.motion._body_pos_w[self._future_ts, self.anchor_index] + self._env.scene.env_origins.unsqueeze(1)
+
+    @property
+    def future_anchor_quat_w(self) -> torch.Tensor:
+        return self.motion._body_quat_w[self._future_ts, self.anchor_index]
+
+    @property
+    def future_body_pos_w(self) -> torch.Tensor:
+        return self.motion._body_pos_w[self._future_ts] + self._env.scene.env_origins[:, None, None, :]
+
+    @property
+    def future_body_quat_w(self) -> torch.Tensor:
+        return self.motion._body_quat_w[self._future_ts]
 
     @property
     def body_pos_w(self) -> torch.Tensor:
@@ -136,6 +178,49 @@ class MotionCommand(CommandTerm):
     @property
     def robot_anchor_ang_vel_w(self) -> torch.Tensor:
         return self.robot.data.body_ang_vel_w[:, self.anchor_index]
+
+    # -- reference object data properties
+    @property
+    def ref_obj_pos_w(self) -> torch.Tensor:
+        return self.motion.object_pos_w[self.time_steps] + self._env.scene.env_origins
+
+    @property
+    def ref_obj_quat_w(self) -> torch.Tensor:
+        return self.motion.object_quat_w[self.time_steps]
+
+    @property
+    def ref_obj_lin_vel_w(self) -> torch.Tensor:
+        return self.motion.object_lin_vel_w[self.time_steps]
+
+    @property
+    def ref_obj_ang_vel_w(self) -> torch.Tensor:
+        return self.motion.object_ang_vel_w[self.time_steps]
+
+    # -- future reference object data (num_envs, num_offsets, ...)
+    @property
+    def future_obj_pos_w(self) -> torch.Tensor:
+        return self.motion.object_pos_w[self._future_ts] + self._env.scene.env_origins.unsqueeze(1)
+
+    @property
+    def future_obj_quat_w(self) -> torch.Tensor:
+        return self.motion.object_quat_w[self._future_ts]
+
+    # -- sim object data properties
+    @property
+    def obj_pos_w(self) -> torch.Tensor:
+        return self.object.data.root_pos_w
+
+    @property
+    def obj_quat_w(self) -> torch.Tensor:
+        return self.object.data.root_quat_w
+
+    @property
+    def obj_lin_vel_w(self) -> torch.Tensor:
+        return self.object.data.root_lin_vel_w
+
+    @property
+    def obj_ang_vel_w(self) -> torch.Tensor:
+        return self.object.data.root_ang_vel_w
 
     # -- CommandTerm interface
     def _update_metrics(self):
@@ -196,6 +281,15 @@ class MotionCommand(CommandTerm):
         )
         self.robot.write_joint_state_to_sim(joint_pos[env_ids], joint_vel[env_ids], env_ids=env_ids)
 
+        # Reset object to reference state
+        obj_state = torch.cat([
+            self.ref_obj_pos_w[env_ids],
+            self.ref_obj_quat_w[env_ids],
+            self.ref_obj_lin_vel_w[env_ids],
+            self.ref_obj_ang_vel_w[env_ids],
+        ], dim=-1)
+        self.object.write_root_state_to_sim(obj_state, env_ids=env_ids)
+
     def _update_command(self):
         self.time_steps += 1
         env_ids_to_reset = torch.where(self.time_steps >= self.motion.time_step_total)[0]
@@ -252,6 +346,7 @@ class MotionCommand(CommandTerm):
 class MotionCommandCfg(CommandTermCfg):
     class_type: type = MotionCommand
     asset_name: str = "robot"
+    object_name: str = "object"
 
     anchor_body_name: str = "pelvis"
     body_names: list[str] = [
@@ -264,6 +359,9 @@ class MotionCommandCfg(CommandTermCfg):
         "left_shoulder_roll_link", "left_elbow_link", "left_wrist_yaw_link",
         "right_shoulder_roll_link", "right_elbow_link", "right_wrist_yaw_link",
     ]
+
+    future_offsets: list[int] = [0, 1, 2, 4, 8]
+    """Frame offsets for observation (0 = current frame)."""
 
     motion_file: str = "./data/output.npz"
 

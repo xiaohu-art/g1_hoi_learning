@@ -18,6 +18,8 @@ parser.add_argument("--input_file", type=str, required=True, help="Path to the r
 parser.add_argument("--output_file", type=str, required=True, help="Path to the output npz file.")
 parser.add_argument("--input_fps", type=int, default=30, help="FPS of the input motion.")
 parser.add_argument("--output_fps", type=int, default=50, help="FPS of the output motion.")
+parser.add_argument("--num_surface_points", type=int, default=1024, help="Number of surface points to sample on the object mesh.")
+parser.add_argument("--contact_distance_threshold", type=float, default=0.05, help="Distance threshold (meters) for binary contact label.")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
@@ -32,6 +34,7 @@ import joblib
 import isaaclab.sim as sim_utils
 from isaaclab.assets import AssetBaseCfg
 from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
+from isaaclab.sensors import ContactSensorCfg
 from isaaclab.sim import SimulationContext
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
@@ -116,6 +119,38 @@ class ReplaySceneCfg(InteractiveSceneCfg):
 
     obj = CLOTHESSTAND_CFG.replace(prim_path="{ENV_REGEX_NS}/Object")
 
+    contact_sensor = ContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Object",
+        history_length=2,
+        track_air_time=True,
+        filter_prim_paths_expr=[
+            # robot.body_names order
+            "{ENV_REGEX_NS}/Robot/pelvis",
+            "{ENV_REGEX_NS}/Robot/left_hip_pitch_link", "{ENV_REGEX_NS}/Robot/right_hip_pitch_link",
+            "{ENV_REGEX_NS}/Robot/waist_yaw_link",
+            "{ENV_REGEX_NS}/Robot/left_hip_roll_link", "{ENV_REGEX_NS}/Robot/right_hip_roll_link",
+            "{ENV_REGEX_NS}/Robot/waist_roll_link",
+            "{ENV_REGEX_NS}/Robot/left_hip_yaw_link", "{ENV_REGEX_NS}/Robot/right_hip_yaw_link",
+            "{ENV_REGEX_NS}/Robot/torso_link",
+            "{ENV_REGEX_NS}/Robot/left_knee_link", "{ENV_REGEX_NS}/Robot/right_knee_link",
+            "{ENV_REGEX_NS}/Robot/left_shoulder_pitch_link", "{ENV_REGEX_NS}/Robot/right_shoulder_pitch_link",
+            "{ENV_REGEX_NS}/Robot/left_ankle_pitch_link", "{ENV_REGEX_NS}/Robot/right_ankle_pitch_link",
+            "{ENV_REGEX_NS}/Robot/left_shoulder_roll_link", "{ENV_REGEX_NS}/Robot/right_shoulder_roll_link",
+            "{ENV_REGEX_NS}/Robot/left_ankle_roll_link", "{ENV_REGEX_NS}/Robot/right_ankle_roll_link",
+            "{ENV_REGEX_NS}/Robot/left_shoulder_yaw_link", "{ENV_REGEX_NS}/Robot/right_shoulder_yaw_link",
+            "{ENV_REGEX_NS}/Robot/left_elbow_link", "{ENV_REGEX_NS}/Robot/right_elbow_link",
+            "{ENV_REGEX_NS}/Robot/left_wrist_roll_link", "{ENV_REGEX_NS}/Robot/right_wrist_roll_link",
+            "{ENV_REGEX_NS}/Robot/left_wrist_pitch_link", "{ENV_REGEX_NS}/Robot/right_wrist_pitch_link",
+            "{ENV_REGEX_NS}/Robot/left_wrist_yaw_link", "{ENV_REGEX_NS}/Robot/right_wrist_yaw_link",
+            "{ENV_REGEX_NS}/Robot/L_index_proximal", "{ENV_REGEX_NS}/Robot/L_middle_proximal", "{ENV_REGEX_NS}/Robot/L_pinky_proximal", "{ENV_REGEX_NS}/Robot/L_ring_proximal", "{ENV_REGEX_NS}/Robot/L_thumb_proximal_base",
+            "{ENV_REGEX_NS}/Robot/R_index_proximal", "{ENV_REGEX_NS}/Robot/R_middle_proximal", "{ENV_REGEX_NS}/Robot/R_pinky_proximal", "{ENV_REGEX_NS}/Robot/R_ring_proximal", "{ENV_REGEX_NS}/Robot/R_thumb_proximal_base",
+            "{ENV_REGEX_NS}/Robot/L_index_intermediate", "{ENV_REGEX_NS}/Robot/L_middle_intermediate", "{ENV_REGEX_NS}/Robot/L_pinky_intermediate", "{ENV_REGEX_NS}/Robot/L_ring_intermediate", "{ENV_REGEX_NS}/Robot/L_thumb_proximal",
+            "{ENV_REGEX_NS}/Robot/R_index_intermediate", "{ENV_REGEX_NS}/Robot/R_middle_intermediate", "{ENV_REGEX_NS}/Robot/R_pinky_intermediate", "{ENV_REGEX_NS}/Robot/R_ring_intermediate", "{ENV_REGEX_NS}/Robot/R_thumb_proximal",
+            "{ENV_REGEX_NS}/Robot/L_thumb_intermediate", "{ENV_REGEX_NS}/Robot/R_thumb_intermediate",
+            "{ENV_REGEX_NS}/Robot/L_thumb_distal", "{ENV_REGEX_NS}/Robot/R_thumb_distal",
+        ],
+    )
+
 
 class MotionLoader:
     def __init__(self, data: dict, input_fps: int, output_fps: int, device: torch.device):
@@ -144,6 +179,9 @@ class MotionLoader:
             quat_from_matrix(torch.from_numpy(obj["rot"]).to(self.device, dtype=torch.float32))
         )
 
+        # Contact labels
+        self.contact_label_input = torch.from_numpy(data["contact_label"]).to(self.device, dtype=torch.float32)
+
         self.input_frames = self.root_poss_input.shape[0]
         self.duration = (self.input_frames - 1) * self.input_dt
         print(f"Motion loaded, duration: {self.duration:.2f} sec, frames: {self.input_frames}")
@@ -158,6 +196,10 @@ class MotionLoader:
         self.dof_poss = self._lerp(self.dof_poss_input[idx0], self.dof_poss_input[idx1], blend.unsqueeze(1))
         self.object_poss = self._lerp(self.object_poss_input[idx0], self.object_poss_input[idx1], blend.unsqueeze(1))
         self.object_rots = self._slerp(self.object_rots_input[idx0], self.object_rots_input[idx1], blend)
+
+        # Contact labels: nearest-neighbor interpolation (binary, don't blend)
+        nearest = torch.where(blend < 0.5, idx0, idx1)
+        self.contact_labels = self.contact_label_input[nearest]  # (output_frames, n_sensor_bodies)
 
         print(
             f"Motion interpolated, input frames: {self.input_frames}, input fps: {self.input_fps},"
@@ -206,6 +248,7 @@ class MotionLoader:
             self.object_rots[self.current_idx : self.current_idx + 1],
             self.object_lin_vels[self.current_idx : self.current_idx + 1],
             self.object_ang_vels[self.current_idx : self.current_idx + 1],
+            self.contact_labels[self.current_idx],
         )
         self.current_idx += 1
         reset_flag = self.current_idx >= self.output_frames
@@ -238,6 +281,7 @@ def process_motion(sim: SimulationContext, scene: InteractiveScene, joint_indice
         "object_quat_w": [],
         "object_lin_vel_w": [],
         "object_ang_vel_w": [],
+        "contact_label": [],
     }
 
     while simulation_app.is_running():
@@ -246,6 +290,7 @@ def process_motion(sim: SimulationContext, scene: InteractiveScene, joint_indice
                 root_pos, root_rot, root_lin_vel, root_ang_vel,
                 dof_pos, dof_vel,
                 obj_pos, obj_rot, obj_lin_vel, obj_ang_vel,
+                contact_label,
             ),
             reset_flag,
         ) = motion.get_next_state()
@@ -292,6 +337,9 @@ def process_motion(sim: SimulationContext, scene: InteractiveScene, joint_indice
         log["object_lin_vel_w"].append(obj_asset.data.body_lin_vel_w[0, 0].cpu().numpy().copy())
         log["object_ang_vel_w"].append(obj_asset.data.body_ang_vel_w[0, 0].cpu().numpy().copy())
 
+        # Record contact labels 
+        log["contact_label"].append(contact_label.cpu().numpy().copy())
+
         if reset_flag:
             for k in list(log.keys()):
                 if k != "fps":
@@ -315,12 +363,17 @@ def main():
 
     # Map pkl joint ordering to robot joint indices
     robot = scene["robot"]
+
     joint_indices, _ = robot.find_joints(G1_JOINT_NAMES, preserve_order=True)
-    print(f"[INFO]: Matched {len(joint_indices)} joints")
 
     # Load retargeted data
     print(f"[INFO]: Loading motion from {args_cli.input_file}")
     data = joblib.load(args_cli.input_file)
+
+    # Reorder contact labels from pkl (pytorch-kinematics order) to robot body order
+    pk_body_names = {name: i for i, name in enumerate(data["link_names"])}
+    reorder_idx = [pk_body_names[name] for name in robot.body_names]
+    data["contact_label"] = data["contact_label"][:, reorder_idx]
 
     log = process_motion(sim, scene, joint_indices, data)
 

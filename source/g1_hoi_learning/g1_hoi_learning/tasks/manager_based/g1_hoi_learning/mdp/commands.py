@@ -33,6 +33,9 @@ class MotionLoader:
         self.object_lin_vel_w = torch.tensor(data["object_lin_vel_w"], dtype=torch.float32, device=device)
         self.object_ang_vel_w = torch.tensor(data["object_ang_vel_w"], dtype=torch.float32, device=device)
 
+        # Contact labels (T, num_bodies) in robot body order
+        self.contact_label = torch.tensor(data["contact_label"], dtype=torch.float32, device=device)
+
 
 class MotionCommand(CommandTerm):
     cfg: "MotionCommandCfg"
@@ -204,6 +207,17 @@ class MotionCommand(CommandTerm):
     @property
     def future_obj_quat_w(self) -> torch.Tensor:
         return self.motion.object_quat_w[self._future_ts]
+
+    # -- reference contact label
+    @property
+    def ref_contact_label(self) -> torch.Tensor:
+        """Reference contact labels for current timestep. (num_envs, num_bodies)"""
+        return self.motion.contact_label[self.time_steps]
+
+    @property
+    def future_contact_label(self) -> torch.Tensor:
+        """Future reference contact labels. (num_envs, num_offsets, num_bodies)"""
+        return self.motion.contact_label[self._future_ts]
 
     # -- sim object data properties
     @property

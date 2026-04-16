@@ -7,6 +7,7 @@ from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.sensors import ContactSensorCfg
 from isaaclab.utils import configclass
 
 from . import mdp
@@ -40,6 +41,46 @@ class G1HoiLearningSceneCfg(InteractiveSceneCfg):
     dome_light = AssetBaseCfg(
         prim_path="/World/DomeLight",
         spawn=sim_utils.DomeLightCfg(color=(0.9, 0.9, 0.9), intensity=500.0),
+    )
+
+    contact_sensor = ContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Object",
+        history_length=2,
+        track_air_time=True,
+        filter_prim_paths_expr=[
+            # robot.body_names order
+            "{ENV_REGEX_NS}/Robot/pelvis",
+            "{ENV_REGEX_NS}/Robot/left_hip_pitch_link", "{ENV_REGEX_NS}/Robot/right_hip_pitch_link",
+            "{ENV_REGEX_NS}/Robot/waist_yaw_link",
+            "{ENV_REGEX_NS}/Robot/left_hip_roll_link", "{ENV_REGEX_NS}/Robot/right_hip_roll_link",
+            "{ENV_REGEX_NS}/Robot/waist_roll_link",
+            "{ENV_REGEX_NS}/Robot/left_hip_yaw_link", "{ENV_REGEX_NS}/Robot/right_hip_yaw_link",
+            "{ENV_REGEX_NS}/Robot/torso_link",
+            "{ENV_REGEX_NS}/Robot/left_knee_link", "{ENV_REGEX_NS}/Robot/right_knee_link",
+            "{ENV_REGEX_NS}/Robot/left_shoulder_pitch_link", "{ENV_REGEX_NS}/Robot/right_shoulder_pitch_link",
+            "{ENV_REGEX_NS}/Robot/left_ankle_pitch_link", "{ENV_REGEX_NS}/Robot/right_ankle_pitch_link",
+            "{ENV_REGEX_NS}/Robot/left_shoulder_roll_link", "{ENV_REGEX_NS}/Robot/right_shoulder_roll_link",
+            "{ENV_REGEX_NS}/Robot/left_ankle_roll_link", "{ENV_REGEX_NS}/Robot/right_ankle_roll_link",
+            "{ENV_REGEX_NS}/Robot/left_shoulder_yaw_link", "{ENV_REGEX_NS}/Robot/right_shoulder_yaw_link",
+            "{ENV_REGEX_NS}/Robot/left_elbow_link", "{ENV_REGEX_NS}/Robot/right_elbow_link",
+            "{ENV_REGEX_NS}/Robot/left_wrist_roll_link", "{ENV_REGEX_NS}/Robot/right_wrist_roll_link",
+            "{ENV_REGEX_NS}/Robot/left_wrist_pitch_link", "{ENV_REGEX_NS}/Robot/right_wrist_pitch_link",
+            "{ENV_REGEX_NS}/Robot/left_wrist_yaw_link", "{ENV_REGEX_NS}/Robot/right_wrist_yaw_link",
+            "{ENV_REGEX_NS}/Robot/L_index_proximal", "{ENV_REGEX_NS}/Robot/L_middle_proximal",
+            "{ENV_REGEX_NS}/Robot/L_pinky_proximal", "{ENV_REGEX_NS}/Robot/L_ring_proximal",
+            "{ENV_REGEX_NS}/Robot/L_thumb_proximal_base",
+            "{ENV_REGEX_NS}/Robot/R_index_proximal", "{ENV_REGEX_NS}/Robot/R_middle_proximal",
+            "{ENV_REGEX_NS}/Robot/R_pinky_proximal", "{ENV_REGEX_NS}/Robot/R_ring_proximal",
+            "{ENV_REGEX_NS}/Robot/R_thumb_proximal_base",
+            "{ENV_REGEX_NS}/Robot/L_index_intermediate", "{ENV_REGEX_NS}/Robot/L_middle_intermediate",
+            "{ENV_REGEX_NS}/Robot/L_pinky_intermediate", "{ENV_REGEX_NS}/Robot/L_ring_intermediate",
+            "{ENV_REGEX_NS}/Robot/L_thumb_proximal",
+            "{ENV_REGEX_NS}/Robot/R_index_intermediate", "{ENV_REGEX_NS}/Robot/R_middle_intermediate",
+            "{ENV_REGEX_NS}/Robot/R_pinky_intermediate", "{ENV_REGEX_NS}/Robot/R_ring_intermediate",
+            "{ENV_REGEX_NS}/Robot/R_thumb_proximal",
+            "{ENV_REGEX_NS}/Robot/L_thumb_intermediate", "{ENV_REGEX_NS}/Robot/R_thumb_intermediate",
+            "{ENV_REGEX_NS}/Robot/L_thumb_distal", "{ENV_REGEX_NS}/Robot/R_thumb_distal",
+        ],
     )
 
 
@@ -81,7 +122,8 @@ class ActionsCfg:
 
     joint_pos = mdp.JointPositionActionCfg(
         asset_name="robot",
-        joint_names=["^(?!.*(thumb|index|middle|ring|pinky)).*$"]
+        # joint_names=["^(?!.*(thumb|index|middle|ring|pinky)).*$"]
+        joint_names=[".*"]
     )
 
 
@@ -104,6 +146,9 @@ class ObservationsCfg:
         # reference object tracking (current + future)
         motion_future_obj_pos_b = ObsTerm(func=mdp.motion_future_obj_pos_b, params={"command_name": "motion"})
         motion_future_obj_ori_b = ObsTerm(func=mdp.motion_future_obj_ori_b, params={"command_name": "motion"})
+        # reference contact
+        motion_future_contact_label = ObsTerm(func=mdp.motion_future_contact_label, params={"command_name": "motion"})
+        contact = ObsTerm(func=mdp.contact, params={"sensor_name": "contact_sensor"})
         # robot state
         body_pos = ObsTerm(func=mdp.robot_body_pos_b, params={"command_name": "motion"})
         body_ori = ObsTerm(func=mdp.robot_body_ori_b, params={"command_name": "motion"})
@@ -136,6 +181,9 @@ class ObservationsCfg:
         # reference object tracking (current + future)
         motion_future_obj_pos_b = ObsTerm(func=mdp.motion_future_obj_pos_b, params={"command_name": "motion"})
         motion_future_obj_ori_b = ObsTerm(func=mdp.motion_future_obj_ori_b, params={"command_name": "motion"})
+        # contact (reference + sim)
+        motion_future_contact_label = ObsTerm(func=mdp.motion_future_contact_label, params={"command_name": "motion"})
+        contact = ObsTerm(func=mdp.contact, params={"sensor_name": "contact_sensor"})
         # robot state
         body_pos = ObsTerm(func=mdp.robot_body_pos_b, params={"command_name": "motion"})
         body_ori = ObsTerm(func=mdp.robot_body_ori_b, params={"command_name": "motion"})
@@ -190,6 +238,28 @@ class RewardsCfg:
         weight=1.0,
         params={"command_name": "motion", "std": 3.14},
     )
+    # object tracking
+    object_pos = RewTerm(
+        func=mdp.object_position_error_exp,
+        weight=1.0,
+        params={"command_name": "motion", "std": 0.3},
+    )
+    object_ori = RewTerm(
+        func=mdp.object_orientation_error_exp,
+        weight=1.0,
+        params={"command_name": "motion", "std": 0.4},
+    )
+    # contact
+    contact = RewTerm(
+        func=mdp.contact_reward,
+        weight=1.0,
+        params={
+            "command_name": "motion",
+            "sensor_name": "contact_sensor",
+            "hand_body_names": ["L_.*", "R_.*"],
+        },
+    )
+    # regularization
     action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.1)
     joint_limit = RewTerm(
         func=mdp.joint_pos_limits,
@@ -212,6 +282,14 @@ class TerminationsCfg:
         func=mdp.bad_anchor_ori,
         params={"asset_cfg": SceneEntityCfg("robot"), "command_name": "motion", "threshold": 0.8},
     )
+    object_pos = DoneTerm(
+        func=mdp.bad_object_pos,
+        params={"command_name": "motion", "threshold": 0.25},
+    )
+    object_ori = DoneTerm(
+        func=mdp.bad_object_ori,
+        params={"asset_cfg": SceneEntityCfg("robot"), "command_name": "motion", "threshold": 0.8},
+    )
     ee_body_pos = DoneTerm(
         func=mdp.bad_motion_body_pos_z_only,
         params={
@@ -225,6 +303,15 @@ class TerminationsCfg:
             ],
         },
     )
+    # bad_contact = DoneTerm(
+    #     func=mdp.bad_contact,
+    #     params={
+    #         "command_name": "motion",
+    #         "sensor_name": "contact_sensor",
+    #         "hand_body_names": ["L_.*", "R_.*"],
+    #         "max_lost_frames": 50,
+    #     },
+    # )
 
 
 ##
@@ -252,4 +339,4 @@ class G1HoiLearningEnvCfg(ManagerBasedRLEnvCfg):
         self.viewer.asset_name = "robot"
         self.sim.dt = 1 / 200
         self.sim.render_interval = self.decimation
-        self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
+        self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**16

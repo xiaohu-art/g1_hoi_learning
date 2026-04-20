@@ -33,6 +33,9 @@ class MotionLoader:
         self.object_lin_vel_w = torch.tensor(data["object_lin_vel_w"], dtype=torch.float32, device=device)
         self.object_ang_vel_w = torch.tensor(data["object_ang_vel_w"], dtype=torch.float32, device=device)
 
+        # Contact labels (T, num_bodies) in robot body order
+        self.contact_label = torch.tensor(data["contact_label"], dtype=torch.float32, device=device)
+
 
 class MotionCommand(CommandTerm):
     cfg: "MotionCommandCfg"
@@ -205,6 +208,17 @@ class MotionCommand(CommandTerm):
     def future_obj_quat_w(self) -> torch.Tensor:
         return self.motion.object_quat_w[self._future_ts]
 
+    # -- reference contact label
+    @property
+    def ref_contact_label(self) -> torch.Tensor:
+        """Reference contact labels for current timestep. (num_envs, num_bodies)"""
+        return self.motion.contact_label[self.time_steps]
+
+    @property
+    def future_contact_label(self) -> torch.Tensor:
+        """Future reference contact labels. (num_envs, num_offsets, num_bodies)"""
+        return self.motion.contact_label[self._future_ts]
+
     # -- sim object data properties
     @property
     def obj_pos_w(self) -> torch.Tensor:
@@ -239,11 +253,13 @@ class MotionCommand(CommandTerm):
         if len(env_ids) == 0:
             return
 
-        random_frames = torch.randint(
-            0, self.motion.time_step_total, (len(env_ids),),
-            device=self.device, dtype=torch.long,
-        )
-        self.time_steps[env_ids] = random_frames
+        if self.cfg.rsi:
+            self.time_steps[env_ids] = torch.randint(
+                0, self.motion.time_step_total, (len(env_ids),),
+                device=self.device, dtype=torch.long,
+            )
+        else:
+            self.time_steps[env_ids] = 0
 
         # Randomize root pose
         root_pos = self.anchor_pos_w.clone()
@@ -362,6 +378,9 @@ class MotionCommandCfg(CommandTermCfg):
 
     future_offsets: list[int] = [0, 1, 2, 4, 8]
     """Frame offsets for observation (0 = current frame)."""
+
+    rsi: bool = True
+    """Random State Initialization: start from random frame (training) or frame 0 (evaluation)."""
 
     motion_file: str = "./data/output.npz"
 

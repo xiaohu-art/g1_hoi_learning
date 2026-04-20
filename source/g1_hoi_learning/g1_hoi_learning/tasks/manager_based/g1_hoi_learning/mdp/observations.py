@@ -221,3 +221,25 @@ def motion_future_obj_ori_b(env: ManagerBasedEnv, command_name: str) -> torch.Te
     )
     mat = matrix_from_quat(ori_b)
     return mat[..., :2].reshape(env.num_envs, -1)
+
+
+# -- Contact observations --
+
+
+def motion_contact_label(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
+    """Reference per-body contact labels for current timestep. (num_envs, num_bodies)"""
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    return command.ref_contact_label
+
+
+def motion_future_contact_label(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
+    """Future reference contact labels. (num_envs, num_offsets * num_bodies)"""
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    return command.future_contact_label.reshape(env.num_envs, -1)
+
+
+def contact(env: ManagerBasedEnv, sensor_name: str, threshold: float = 1.0) -> torch.Tensor:
+    """Per-robot-body binary contact flag with object from force_matrix_w. (num_envs, 54)"""
+    sensor = env.scene[sensor_name]
+    forces = sensor.data.force_matrix_w[:, 0, :, :]  # (num_envs, 54, 3)
+    return (forces.norm(dim=-1) > threshold).float()

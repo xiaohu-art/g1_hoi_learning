@@ -304,15 +304,15 @@ class TerminationsCfg:
             ],
         },
     )
-    # bad_contact = DoneTerm(
-    #     func=mdp.bad_contact,
-    #     params={
-    #         "command_name": "motion",
-    #         "sensor_name": "contact_sensor",
-    #         "hand_body_names": ["L_.*", "R_.*"],
-    #         "max_lost_frames": 50,
-    #     },
-    # )
+    bad_contact = DoneTerm(
+        func=mdp.bad_contact,
+        params={
+            "command_name": "motion",
+            "sensor_name": "contact_sensor",
+            "hand_body_names": ["L_.*", "R_.*"],
+            "max_lost_frames": 20,
+        },
+    )
 
 
 ##

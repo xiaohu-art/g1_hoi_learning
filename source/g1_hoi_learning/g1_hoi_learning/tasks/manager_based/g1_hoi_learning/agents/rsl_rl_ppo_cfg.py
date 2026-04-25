@@ -4,6 +4,15 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 
 
 @configclass
+class MuonPpoAlgorithmCfg(RslRlPpoAlgorithmCfg):
+    """PPO algorithm cfg routed through MuonPPO.
+    """
+
+    class_name: str = "MuonPPO"
+    weight_decay: float = 0.01
+
+
+@configclass
 class SimBaActorCriticCfg(RslRlPpoActorCriticCfg):
     """Config for the SimBa actor-critic backbone.
     """
@@ -39,7 +48,7 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
         critic_num_blocks=2,
         expansion=2,
     )
-    algorithm = RslRlPpoAlgorithmCfg(
+    algorithm = MuonPpoAlgorithmCfg(
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
         clip_param=0.2,
@@ -52,4 +61,5 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
         lam=0.95,
         desired_kl=0.01,
         max_grad_norm=1.0,
+        weight_decay=0.01,
     )

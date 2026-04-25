@@ -10,6 +10,9 @@ Python module serving as a project/extension template.
 # Register actor-critic networks
 from . import networks  # noqa: F401
 
+# Register algorithms (MuonPPO)
+from . import algorithms  # noqa: F401
+
 # Register Gym environments.
 from .tasks import *
 

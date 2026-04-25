@@ -25,6 +25,12 @@ It allows you to develop in an isolated environment, outside of the core Isaac L
     # use 'PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
     python -m pip install -e source/g1_hoi_learning
 
+- Back the torch and nvidia pip prebundle from IsaacSim
+    ```bash
+    mv $ISAACSIM/exts/omni.isaac.ml_archive/pip_prebundle/torch $ISAACSIM/exts/omni.isaac.ml_archive/pip_prebundle/torch.bak
+    mv $ISAACSIM/exts/omni.isaac.ml_archive/pip_prebundle/nvidia $ISAACSIM/exts/omni.isaac.ml_archive/pip_prebundle/nvidia.bak
+    ```
+
 - Verify that the extension is correctly installed by:
 
     - Listing the available tasks:
